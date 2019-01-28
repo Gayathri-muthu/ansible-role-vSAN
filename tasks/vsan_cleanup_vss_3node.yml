@@ -1,0 +1,130 @@
+
+- ignore_errors: false
+  name: Verifying VSAN Datastore (it will take a while)
+  register: chng
+  tags:
+    - vsan_vss_3node_cleanup
+  verify_vsan_for_cleanup:
+    datastore_name: '{{ vsan_datastore_name }}'
+    vcenter_hostname: '{{ vcenter_ip }}'
+    vcenter_password: '{{ vcenter_password }}'
+    vcenter_username: '{{ vcenter_username }}'
+
+- when: chng.vsan_configured == False
+  ignore_errors: true
+  name: Removing VM kernel Adapter for vMotion and vSAN
+  tags:
+    - vsan_vss_3node_cleanup
+  vcenter_remove_vmkernel:
+    host_name: '{{item.ip_address}}'
+    username: '{{item.username}}'
+    password:  '{{item.password}}'
+
+  with_items:
+  - ip_address: '{{esxi_host1_ip }}'
+    username: '{{esxi_host1_username}}'
+    password: '{{esxi_host1_password}}'
+  - ip_address: '{{esxi_host2_ip }}'
+    username: '{{esxi_host2_username}}'
+    password: '{{esxi_host2_password}}'
+  - ip_address: '{{esxi_host3_ip }}'
+    username: '{{esxi_host3_username}}'
+    password: '{{esxi_host3_password}}'
+
+- when: chng.vsan_configured == False
+  ignore_errors: true
+  name: Removing the portgroup
+  tags:
+    - vsan_vss_3node_cleanup
+
+  vcenter_pg_remove:
+    host_name: '{{item.ip_address}}'
+    username: '{{item.username}}'
+    password:  '{{item.password}}'
+    pg_name1: '{{vsan_port_group_name}}'
+    pg_name2: '{{vmotion_port_group_name}}'
+    switchname: '{{switch_name}}'
+  with_items:
+  - ip_address: '{{ esxi_host1_ip }}'
+    username: '{{esxi_host1_username}}'
+    password: '{{esxi_host1_password}}'
+  - ip_address: '{{ esxi_host2_ip }}'
+    username: '{{esxi_host2_username}}'
+    password: '{{esxi_host2_password}}'
+  - ip_address: '{{ esxi_host3_ip }}'
+    username: '{{esxi_host3_username}}'
+    password: '{{esxi_host3_password}}'
+
+- when: chng.vsan_configured == False
+  ignore_errors: true
+  name: Removing the uplink(vmnic)
+  tags:
+    - vsan_vss_3node_cleanup
+
+  vcenter_remove_uplink:
+    host_name: '{{item.ip_address}}'
+    username: '{{item.username}}'
+    password:  '{{item.password}}'
+    vmnic_name: '{{item.vmnic_up2_host}}'
+    switch_name: '{{switch_name}}'
+
+  with_items:
+  - ip_address: '{{ esxi_host1_ip }}'
+    username: '{{esxi_host1_username}}'
+    password: '{{esxi_host1_password}}'
+    vmnic_up2_host: '{{vmnic_up2_host1}}'
+  - ip_address: '{{ esxi_host2_ip }}'
+    username: '{{esxi_host2_username}}'
+    password: '{{esxi_host2_password}}'
+    vmnic_up2_host: '{{vmnic_up2_host2}}'
+
+  - ip_address: '{{ esxi_host3_ip }}'
+    username: '{{esxi_host3_username}}'
+    password: '{{esxi_host3_password}}'
+    vmnic_up2_host: '{{vmnic_up2_host3}}'
+
+- when: chng.vsan_configured == False
+  ignore_errors: true
+  name: Disconnecting the Host
+  tags:
+    - vsan_vss_3node_cleanup
+  host_disconnect:
+    vcenter_ip: '{{vcenter_ip}}'
+    vcenter_username: '{{vcenter_username}}'
+    vcenter_password: '{{vcenter_password}}'
+    vcenter_port: '{{vcenter_port}}'
+
+  
+- when: chng.vsan_configured == False
+  ignore_errors: true
+  name: Cleanup vSAN
+  tags:
+    - vsan_vss_3node_cleanup
+  vsan_cleanup:
+    hostip: '{{ item.ip_address }}'
+    username:  '{{item.username}}'
+    password: '{{item.password}}'
+      
+  with_items:
+  - ip_address: '{{ esxi_host1_ip }}'
+    username: '{{esxi_host1_username}}'
+    password: '{{esxi_host1_password}}'
+  - ip_address: '{{ esxi_host2_ip }}'
+    username: '{{esxi_host2_username}}'
+    password: '{{esxi_host2_password}}'
+  - ip_address: '{{ esxi_host3_ip }}'
+    username: '{{esxi_host3_username}}'
+    password: '{{esxi_host3_password}}'
+
+- when: chng.vsan_configured == False
+  ignore_errors: true
+  name: VM cleanup(Vcenter)
+  tags:
+    - vsan_vss_3node_cleanup
+  vcenter_remove_vm:
+    host_name: '{{ esxi_host1_ip}}'
+    user_name:  '{{esxi_host1_username}}'
+    password: '{{esxi_host1_password}}'
+    vcenter_vm_name: '{{vcenter_vm_name}}'
+      
+

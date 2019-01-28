@@ -1,0 +1,40 @@
+{
+    "__version": "2.3.0",
+    "__comments": "Sample template to deploy a vCenter Server Appliance with an external Platform Services Controller on an ESXi host.",
+    "new.vcsa": {
+        "esxi": {
+            "hostname": "{{ mgmt_host_ip_1 }}",
+            "username": "root",
+            "password": "{{ mgmt_host_passwd_1 }}",
+            "deployment.network": "{{ network_name }}",
+            "datastore": "{{ edge_host_data_store_1 }}"
+        },
+        "appliance": {
+            "thin.disk.mode": true,
+            "deployment.option": "management-small",
+            "name": "{{ vcenter_vm_name }}"
+        },
+        "network": {
+            "ip.family": "{{ ip_family }}",
+            "mode": "static",
+            "ip": "{{ vcenter_ip_address }}",
+            "dns.servers": ["{{ domain_name_server }}"],
+            "prefix": "{{ network_prefix }}",
+            "gateway": "{{ gate_way }}",
+            "system.name": "{{ mgmt_vcenter_fqdn }}"
+        },
+        "os": {
+            "password": "{{ mgmt_vcenter_password }}",
+            "ssh.enable": true,#"{{ ssh_enable }}",
+            "ntp.servers": "{{ ntp_server_ip }}"
+        },
+        "ovftool.arguments":{
+            "prop:guestinfo.cis.appliance.root.shell": "/bin/bash"
+        },
+        "sso": {
+            "password": "{{ mgmt_vcenter_password }}",
+            "domain-name": "vsphere.local",
+            "sso.port": 443
+        }
+    }
+}

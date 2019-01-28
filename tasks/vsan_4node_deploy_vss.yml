@@ -1,0 +1,448 @@
+- - ignore_errors: true
+    tags:
+      - vsan_4node_deploy_vss
+    name: Creating vCenter Appliance metadata
+    template: src=../templates/ib_vcenter_ovf_deploy.yml.j2 dest=/opt/chaperone-ansible/roles/vsan/defaults/main.yml
+  - name: Retrieving info about the directory to mount vCSA ISO
+    tags:
+      - vsan_4node_deploy_vss
+    register: mount_dir_stat_first
+    stat: path="/tmp/vcsa-install"
+  - file: path="/tmp/vcsa-install" state=directory mode=0755
+    name: Creating the mount directory if it dosen't exist
+    when: mount_dir_stat_first.stat.exists == False
+    tags:
+      - vsan_4node_deploy_vss
+  - name: Verifying mount directory again
+    tags:
+      - vsan_4node_deploy_vss
+    register: mount_dir_stat_created
+    stat: path="/tmp/vcsa-install"
+  - name: Find VCSA installer     
+    tags:
+      - vsan_4node_deploy_vss
+    find:
+      paths: /var/www/html/downloads/
+      patterns: "*.iso"
+    register: iso_file
+  - become: true
+    command: /bin/mount -t iso9660 "{{ iso_file.files[0].path }}" "/tmp/vcsa-install"
+    name: Mounting vCSA ISO
+    when: mount_dir_stat_created.stat.wusr == True
+    tags:
+      - vsan_4node_deploy_vss
+  - failed_when: mount_dir_stat_mounted.stat.wusr != False
+    name: Updating info on the mounted directory
+    register: mount_dir_stat_mounted
+    stat: path="/tmp/vcsa-install"
+    tags:
+      - vsan_4node_deploy_vss
+  - name: Verifying if vCenter installation input file is already present
+    register: vc_input_file_stat
+    stat: path="/opt/chaperone-ansible/roles/vsan/defaults/mgmt_vc.json"
+    tags:
+      - vsan_4node_deploy_vss
+  - become: true
+    file: path="/opt/chaperone-ansible/roles/vsan/defaults/mgmt_vc.json"
+      state=absent
+    name: Destroying vCenter input file if already present
+    when: vc_input_file_stat.stat.exists == true
+    tags:
+      - vsan_4node_deploy_vss
+  - ignore_errors: true
+    name: Creating management vCenter metadata
+    template: src=../templates/ib_vcenter_ovf_deploy.yml.j2 dest=/opt/chaperone-ansible/roles/vsan/defaults/main.yml
+    tags:
+      - vsan_4node_deploy_vss
+  - ignore_errors: true
+    name: Creating management vCenter metadata
+    template: src=../templates/mgmt_vc_template.yml.j2 dest=/opt/chaperone-ansible/roles/vsan/defaults/mgmt_vc.json
+    tags:
+      - vsan_4node_deploy_vss
+  - command: '/tmp/vcsa-install/vcsa-cli-installer/lin64/vcsa-deploy install /opt/chaperone-ansible/roles/vsan/defaults/mgmt_vc.json
+      --acknowledge-ceip --accept-eula --no-esx-ssl-verify
+
+      '
+    failed_when: '''Monitor failed:'' in deploy_ovf_cmd_result.stdout or deploy_ovf_cmd_result.rc
+      > 0'
+    ignore_errors: false
+    name: Deploying management vCenter appliance
+    register: deploy_ovf_cmd_result
+    tags:
+      - vsan_4node_deploy_vss
+  - become: true
+    mount: src="{{ iso_file.files[0].path | basename }}" name="/tmp/vcsa-install" fstype=iso9660 state=unmounted
+    name: Unmounting vCSA ISO
+    tags:
+      - vsan_4node_deploy_vss
+  - name: Retrieving info about the mount directory
+    register: mount_dir_stat_unmounted
+    stat: path="/tmp/vcsa-install"
+    tags:
+      - vsan_4node_deploy_vss
+  - become: true
+    file: path="/tmp/vcsa-install" state=absent
+    name: Destroying the temp mount directory
+    when: mount_dir_stat_unmounted.stat.wusr == True
+    tags:
+      - vsan_4node_deploy_vss
+- - ignore_errors: false
+    name: Verifying management vCenter installation
+    verify_vc_psc_installation:
+      host_ip: '{{ vcenter_ip }}'
+      host_password: '{{ vcenter_password }}'
+      state: present
+    tags:
+      - vsan_4node_deploy_vss
+
+  - ignore_errors: false
+    name: Creating Datacenter
+    vcenter_datacenter:
+      datacenter_name: '{{ datacenter_name }}'
+      host: '{{ vcenter_ip }}'
+      login: '{{ vcenter_username }}'
+      password: '{{ vcenter_password }}'
+      port: '{{ vcenter_port }}'
+      state: present
+    tags:
+      - vsan_4node_deploy_vss
+- - ignore_errors: false
+    name: Creating Cluster
+    tags:
+      - vsan_4node_deploy_vss
+    vcenter_cluster:
+      cluster_name: '{{ cluster_name }}'
+      datacenter_name: '{{ datacenter_name }}'
+      drs:
+        defaultVmBehavior: '{{ drs_automation_level }}'
+        enableVmBehaviorOverrides: '{{ drs_override_vm_behavior }}'
+        enabled: false
+        vmotionRate: '{{ drs_vmotion_rate }}'
+      ha:
+        admissionControlEnabled: '{{ ha_admission_control | bool }}'
+        enabled: false
+        failoverLevel: 1
+        hostMonitoring: '{{ ha_host_monitor|lower }}'
+        restartPriority: '{{ ha_restart_priority|lower }}'
+        vmMonitoring: '{{ ha_vm_monitor }}'
+        vmMonitoring_sensitivity: '{{ ha_vm_mon_sensitivity }}'
+      host: '{{ vcenter_ip }}'
+      login: '{{ vcenter_username }}'
+      password: '{{ vcenter_password }}'
+      port: '{{ vcenter_port }}'
+      state: present
+      vsan:
+        autoClaimStorage: false
+        enabled: false
+- - ignore_errors: false
+    name: Adding Hosts to Cluster
+    tags:
+      - vsan_4node_deploy_vss
+    vcenter_addhost:
+      cluster_name: '{{ item.cluster_name }}'
+      datacenter_name: '{{item.datacenter_name }}'
+      esxi_hostname: '{{ item.ip_address }}'
+      esxi_password: '{{ item.password }}'
+      esxi_username: '{{ item.user_name }}'
+      host: '{{ vcenter_ip }}'
+      login: '{{ vcenter_username }}'
+      password: '{{ vcenter_password }}'
+      port: '{{ vcenter_port }}'
+      state: present
+    with_items:
+    - cluster_name: '{{ cluster_name }}'
+      datacenter_name: '{{ datacenter_name }}'
+      ip_address: '{{ esxi_host1_ip }}'
+      password: '{{ esxi_host1_password }}'
+      user_name: '{{ esxi_host1_username }}'
+    - cluster_name: '{{ cluster_name }}'
+      datacenter_name: '{{ datacenter_name }}'
+      ip_address: '{{ esxi_host2_ip }}'
+      password: '{{ esxi_host2_password }}'
+      user_name: '{{ esxi_host2_username }}'
+    - cluster_name: '{{ cluster_name }}'
+      datacenter_name: '{{ datacenter_name }}'
+      ip_address: '{{ esxi_host3_ip }}'
+      password: '{{ esxi_host3_password }}'
+      user_name: '{{ esxi_host3_username }}'
+    - cluster_name: '{{ cluster_name }}'
+      datacenter_name: '{{ datacenter_name }}'
+      ip_address: '{{ esxi_host4_ip }}'
+      password: '{{ esxi_host4_password }}'
+      user_name: '{{ esxi_host4_username }}'
+- ignore_errors: true
+  name: Creating vMotion port group on Standard switch
+  tags:
+    - vsan_4node_deploy_vss
+  vswitch:
+    vcenter_ip: '{{ vcenter_ip }}'
+    username: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'
+    port_group_name: '{{ vmotion_port_group_name }}'
+    vss_name: '{{ switch_name }}'
+    vlan: '{{ vmotion_vlan_name }}'
+    host_name: '{{ item.ip_address }}'
+  with_items:
+  - ip_address: '{{ esxi_host1_ip }}'
+  - ip_address: '{{ esxi_host2_ip }}'
+  - ip_address: '{{ esxi_host3_ip }}'
+  - ip_address: '{{ esxi_host4_ip }}'
+
+- ignore_errors: false
+  name: Creating vSAN port group on Standard switch
+  tags:
+    - vsan_4node_deploy_vss
+  vswitch:
+    vcenter_ip: '{{ vcenter_ip }}'
+    username: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'   
+    port_group_name: '{{ vsan_port_group_name }}'
+    vss_name: '{{ switch_name }}'
+    vlan: '{{ vsan_vlan_name }}'
+    host_name: '{{ item.ip_address }}'
+  with_items:
+  - ip_address: '{{ esxi_host1_ip }}'
+  - ip_address: '{{ esxi_host2_ip }}'
+  - ip_address: '{{ esxi_host3_ip }}'
+  - ip_address: '{{ esxi_host4_ip }}'
+
+- ignore_errors: true
+  name: Assigning an Uplink to a Standard Switch
+  tags:
+    - vsan_4node_deploy_vss
+  vswitch_uplink:
+    host_name: '{{ item.ip_address }}'
+    username: '{{ esxi_host1_username }}'
+    password:  '{{ esxi_host1_password }}'
+    vmnic_name: '{{ item.vmnic }}'
+    vswitch_name: '{{ switch_name }}'
+  with_items:
+  - ip_address: '{{ esxi_host1_ip }}'
+    vmnic: '{{ vmnic_up2_host1 }}'
+  - ip_address: '{{ esxi_host2_ip }}'
+    vmnic: '{{ vmnic_up2_host2 }}'
+  - ip_address: '{{ esxi_host3_ip }}'
+    vmnic: '{{ vmnic_up2_host3 }}'
+  - ip_address: '{{ esxi_host4_ip }}'
+    vmnic: '{{ vmnic_up2_host4 }}'
+
+- ignore_errors: true
+  name: Creating VM kernel adapter for vMotion for hosts
+  tags:
+    - vsan_4node_deploy_vss
+  vswitch_vmk:
+    vcenter_ip: '{{ vcenter_ip }}'
+    username: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'     
+    port_group_name: '{{ vmotion_port_group_name }}'       
+    host_name: '{{ item.host_ip }}'
+    service_type: vmotion
+    assign_ip: '{{ item.vmotion_ip_address }}'
+    subnet_mask: '{{ vmotion_subnet_mask }}'
+  with_items:
+  - host_ip: '{{ esxi_host4_ip }}'
+    vmotion_ip_address: '{{ vmotion_vmk_adapter_ip_address_host4 }}'
+  - host_ip: '{{ esxi_host3_ip }}'
+    vmotion_ip_address: '{{ vmotion_vmk_adapter_ip_address_host3 }}'
+  - host_ip: '{{ esxi_host2_ip }}'
+    vmotion_ip_address: '{{ vmotion_vmk_adapter_ip_address_host2 }}'
+  - host_ip: '{{ esxi_host1_ip }}'
+    vmotion_ip_address: '{{ vmotion_vmk_adapter_ip_address_host1 }}'
+- ignore_errors: false
+  name: Creating VM kernel adapter for vSAN for hosts
+  tags:
+    - vsan_4node_deploy_vss
+  vswitch_vmk:
+    vcenter_ip: '{{ vcenter_ip }}'
+    username: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'       
+    port_group_name: '{{ vsan_port_group_name }}'       
+    host_name: '{{ item.host_ip }}'
+    service_type: vsan
+    assign_ip: '{{ item.vsan_ip_address }}'
+    subnet_mask: '{{ vsan_subnet_mask }}'
+  with_items:
+  - host_ip: '{{ esxi_host4_ip }}'
+    vsan_ip_address: '{{ vsan_vmk_adapter_ip_address_host4 }}'
+  - host_ip: '{{ esxi_host3_ip }}'
+    vsan_ip_address: '{{ vsan_vmk_adapter_ip_address_host3 }}'
+  - host_ip: '{{ esxi_host2_ip }}'
+    vsan_ip_address: '{{ vsan_vmk_adapter_ip_address_host2 }}'
+  - host_ip: '{{ esxi_host1_ip }}'
+    vsan_ip_address: '{{ vsan_vmk_adapter_ip_address_host1 }}'
+
+- - ignore_errors: false
+    name: Enabling vSAN on cluster
+    tags:
+      - vsan_4node_deploy_vss
+    vcenter_cluster:
+      cluster_name: '{{ cluster_name }}'
+      datacenter_name: '{{ datacenter_name }}'
+      drs:
+        defaultVmBehavior: '{{ drs_automation_level }}'
+        enableVmBehaviorOverrides: '{{ drs_override_vm_behavior | bool }}'
+        enabled: false
+        vmotionRate: '{{ drs_vmotion_rate }}'
+      ha:
+        admissionControlEnabled: '{{ ha_admission_control | bool }}'
+        enabled: false
+        failoverLevel: 1
+        hostMonitoring: '{{ ha_host_monitor|lower }}'
+        restartPriority: '{{ ha_restart_priority|lower }}'
+        vmMonitoring: 'vmMonitoringDisabled'
+        vmMonitoring_sensitivity: '{{ ha_vm_mon_sensitivity }}'
+      host: '{{ vcenter_ip }}'
+      login: '{{ vcenter_username }}'
+      password: '{{ vcenter_password }}'
+      port: '{{ vcenter_port }}'
+      state: present
+      vsan:
+        autoClaimStorage: false
+        enabled: true
+  - name: Pause --IGNORE
+    tags:
+      - vsan_4node_deploy_vss
+    pause:
+      minutes: 1.0
+      #seconds: 30
+  - ignore_errors: false
+    name: Configuring DRS mode on cluster
+    tags:
+      - vsan_4node_deploy_vss
+    vcenter_cluster:
+      cluster_name: '{{ cluster_name }}'
+      datacenter_name: '{{ datacenter_name }}'
+      drs:
+        defaultVmBehavior: '{{ drs_automation_level }}'
+        enableVmBehaviorOverrides: '{{ drs_override_vm_behavior }}'
+        enabled: true
+        vmotionRate: '{{ drs_vmotion_rate }}'
+      ha:
+        admissionControlEnabled: '{{ ha_admission_control | bool }}'
+        enabled: false
+        failoverLevel: 1
+        hostMonitoring: '{{ ha_host_monitor|lower }}'
+        restartPriority: '{{ ha_restart_priority|lower }}'
+        vmMonitoring: '{{ ha_vm_monitor }}'
+        vmMonitoring_sensitivity: '{{ ha_vm_mon_sensitivity }}'
+      host: '{{ vcenter_ip }}'
+      login: '{{ vcenter_username }}'
+      password: '{{ vcenter_password }}'
+      port: '{{ vcenter_port }}'
+      state: present
+      vsan:
+        autoClaimStorage: false
+        enabled: false
+    when: enable_drs == '1'
+  - name: Pause --IGNORE
+    tags:
+      - vsan_4node_deploy_vss
+    pause:
+      minutes: 1.0
+      #seconds: 30
+  - ignore_errors: true
+    name: Configuring HA mode on cluster
+    tags:
+      - vsan_4node_deploy_vss
+    vcenter_cluster:
+      cluster_name: '{{ cluster_name }}'
+      datacenter_name: '{{ datacenter_name }}'
+      drs:
+        defaultVmBehavior: '{{ drs_automation_level }}'
+        enableVmBehaviorOverrides: '{{ drs_override_vm_behavior }}'
+        enabled: false
+        vmotionRate: '{{ drs_vmotion_rate }}'
+      ha:
+        admissionControlEnabled: '{{ ha_admission_control | bool }}'
+        enabled: true
+        failoverLevel: 1
+        hostMonitoring: '{{ ha_host_monitor|lower }}'
+        restartPriority: '{{ ha_restart_priority|lower }}'
+        vmMonitoring: '{{ ha_vm_monitor }}'
+        vmMonitoring_sensitivity: '{{ ha_vm_mon_sensitivity }}'
+      host: '{{ vcenter_ip }}'
+      login: '{{ vcenter_username }}'
+      password: '{{ vcenter_password }}'
+      port: '{{ vcenter_port }}'
+      state: present
+      vsan:
+        autoClaimStorage: false
+        enabled: false
+    when: enable_ha == '1'
+  - name: Pause --IGNORE
+    tags:
+      - vsan_4node_deploy_vss
+    pause:
+      minutes: 1.0
+      #seconds: 30
+- - ignore_errors: false
+    name: VSAN Configuration
+    tags:
+      - vsan_4node_deploy_vss
+    vsanDeploy:
+      cluster_name: '{{ cluster_name }}'
+      host: '{{ vcenter_ip }}'
+      login: '{{ vcenter_username }}'
+      password: '{{ vcenter_password }}'
+      vsan_disk_type: '{{ vsan_disk_type }}'     
+- - ignore_errors: false
+    name: Verifying VSAN Datastore (it will take a while)
+    tags:
+      - vsan_4node_deploy_vss
+    vcenter_vsan_datastore_verification:
+      datastore_name: '{{ vsan_datastore_name }}'
+      vcenter_hostname: '{{ vcenter_ip }}'
+      vcenter_password: '{{ vcenter_password }}'
+      vcenter_username: '{{ vcenter_username }}'
+- - ignore_errors: false
+    name: Migrating virtual machines from local datastore to vSAN datastore
+    tags:
+      - vsan_4node_deploy_vss
+    vcenter_datastore_migration:
+      datastore_name: '{{ vsan_datastore_name }}'
+      vcenter_hostname: '{{ vcenter_ip }}'
+      vcenter_password: '{{ vcenter_password }}'
+      vcenter_port: '{{ vcenter_port }}'
+      vcenter_username: '{{ vcenter_username }}'
+      vcenter_name: '{{ vcenter_vm_name }}'
+    when: storage_type == 'Local Datastore'
+- ignore_errors: true
+  name: Delete local datastore
+  tags:
+    - vsan_4node_deploy_vss
+  delete_datastore:
+    vcenter_ip: '{{ vcenter_ip }}'
+    username: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'
+    host_name: '{{ item.ip_address }}'
+    ds_name: '{{ datastore_name }}'
+  with_items:
+  - ip_address: '{{ esxi_host1_ip }}'
+  when: storage_type == 'Local Datastore'
+
+- ignore_errors: true
+  name: Reclaim Local Datastore Disk
+  tags:
+    - vsan_4node_deploy_vss
+  reclaim_disk:
+    host: '{{ vcenter_ip }}'
+    login: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'
+    cluster_name: '{{ cluster_name }}'
+    host_name: '{{ item.ip_address }}'
+    disk_name:  '{{ reclaim_disk }}'   
+  with_items:
+  - ip_address: '{{ esxi_host1_ip }}'
+  when: storage_type == 'Local Datastore'
+
+- ignore_errors: true
+  name: Enable vSAN Health and Performance
+  tags:
+    - vsan_4node_deploy_vss
+  vsan_perf:
+    cluster_name: '{{ cluster_name }}'
+    host: '{{ vcenter_ip }}'
+    login: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'
+      
+
