@@ -71,7 +71,7 @@
   tags:
     - vsan_vss_4node_cleanup
 
-  vcenter_remove_uplink:
+  vcenter_vss_remove_uplink:
     host_name: '{{item.ip_address}}'
     username: '{{item.username}}'
     password:  '{{item.password}}'
